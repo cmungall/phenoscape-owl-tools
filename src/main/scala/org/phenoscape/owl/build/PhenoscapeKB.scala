@@ -329,28 +329,29 @@ object PhenoscapeKB extends KnowledgeBaseBuilder {
   val repository = new BigdataSailRepository(sail)
   repository.initialize()
   val bigdata = repository.getUnisolatedConnection()
+  bigdata.setAutoCommit(false)
 
-  val baseURI = ""
-  val graphURI = new URIImpl("http://kb.phenoscape.org/")
-  bigdata.begin()
-  for (rdfFile <- FileUtils.listFiles(KB, Array("owl"), true)) {
-    bigdata.add(rdfFile, baseURI, RDFFormat.RDFXML, graphURI)
-  }
+ // val baseURI = ""
+//  val graphURI = new URIImpl("http://kb.phenoscape.org/")
+//  //bigdata.begin()
+//  for (rdfFile <- FileUtils.listFiles(KB, Array("owl"), true)) {
+//    bigdata.add(rdfFile, baseURI, RDFFormat.RDFXML, graphURI)
+//  }
+//
+//  bigdata.commit()
 
-  bigdata.commit()
-
-  step("Building evolutionary profiles using ancestral states reconstruction")
-  bigdata.begin()
-  bigdata.add(EvolutionaryProfiles.computePhenotypeProfiles(TaxonNode(CHORDATA), fullReasoner, bigdata), graphURI)
-  bigdata.commit()
-
-  fullReasoner.dispose()
-  System.gc()
-
-  step("Building gene profiles")
-  bigdata.begin()
-  bigdata.add(GeneProfiles.generateGeneProfiles(bigdata), graphURI)
-  bigdata.commit()
+//  step("Building evolutionary profiles using ancestral states reconstruction")
+//  //bigdata.begin()
+//  bigdata.add(EvolutionaryProfiles.computePhenotypeProfiles(TaxonNode(CHORDATA), fullReasoner, bigdata), graphURI)
+//  bigdata.commit()
+//
+//  fullReasoner.dispose()
+//  System.gc()
+//
+//  step("Building gene profiles")
+//  //bigdata.begin()
+//  bigdata.add(GeneProfiles.generateGeneProfiles(bigdata), graphURI)
+//  bigdata.commit()
 
   step("Exporting presence assertions")
   val presencesFile = new File(cwd + "/staging/kb/presences.ttl")
@@ -368,47 +369,47 @@ object PhenoscapeKB extends KnowledgeBaseBuilder {
   absencesOutput.close()
   //bigdata.commit()
 
-  step("Load presence/absence data")
-  bigdata.begin()
-  bigdata.add(presencesFile, baseURI, RDFFormat.TURTLE, graphURI)
-  bigdata.add(absencesFile, baseURI, RDFFormat.TURTLE, graphURI)
-  bigdata.commit()
-
-  step("Exporting all triples to turtle file")
-  val triplesQuery = bigdata.prepareGraphQuery(QueryLanguage.SPARQL, """
-  CONSTRUCT {
-   ?s ?p ?o .
-  }
-  FROM <http://kb.phenoscape.org/>
-  WHERE {
-   ?s ?p ?o .
-  }
-  """)
-  //bigdata.begin()
-  val triplesOutput = new BufferedOutputStream(new FileOutputStream(new File(cwd + "/staging/kb/kb.ttl")))
-  triplesQuery.evaluate(new TurtleWriter(triplesOutput))
-  triplesOutput.close()
+//  step("Load presence/absence data")
+//  //bigdata.begin()
+//  bigdata.add(presencesFile, baseURI, RDFFormat.TURTLE, graphURI)
+//  bigdata.add(absencesFile, baseURI, RDFFormat.TURTLE, graphURI)
+//  bigdata.commit()
+//
+//  step("Exporting all triples to turtle file")
+//  val triplesQuery = bigdata.prepareGraphQuery(QueryLanguage.SPARQL, """
+//  CONSTRUCT {
+//   ?s ?p ?o .
+//  }
+//  FROM <http://kb.phenoscape.org/>
+//  WHERE {
+//   ?s ?p ?o .
+//  }
+//  """)
+//  //bigdata.begin()
+//  val triplesOutput = new BufferedOutputStream(new FileOutputStream(new File(cwd + "/staging/kb/kb.ttl")))
+//  triplesQuery.evaluate(new TurtleWriter(triplesOutput))
+//  triplesOutput.close()
   //bigdata.commit()
 
-  step("Exporting phenotypic profiles for semantic similarity")
-  val profilesQuery = bigdata.prepareGraphQuery(QueryLanguage.SPARQL, """
-PREFIX rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
-PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
-PREFIX owl:  <http://www.w3.org/2002/07/owl#>
-PREFIX ps:   <http://purl.org/phenoscape/vocab.owl#>
-CONSTRUCT {
- ?profile rdf:type ?phenotype
-}
-FROM <http://kb.phenoscape.org/>
-WHERE {
-  ?source ps:has_phenotypic_profile ?profile .
-  ?profile rdf:type ?phenotype .
-}
-    """)
-  //bigdata.begin()
-  val profilesOutput = new BufferedOutputStream(new FileOutputStream(new File(cwd + "/staging/kb/profiles.ttl")))
-  profilesQuery.evaluate(new TurtleWriter(profilesOutput))
-  profilesOutput.close()
+//  step("Exporting phenotypic profiles for semantic similarity")
+//  val profilesQuery = bigdata.prepareGraphQuery(QueryLanguage.SPARQL, """
+//PREFIX rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+//PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+//PREFIX owl:  <http://www.w3.org/2002/07/owl#>
+//PREFIX ps:   <http://purl.org/phenoscape/vocab.owl#>
+//CONSTRUCT {
+// ?profile rdf:type ?phenotype
+//}
+//FROM <http://kb.phenoscape.org/>
+//WHERE {
+//  ?source ps:has_phenotypic_profile ?profile .
+//  ?profile rdf:type ?phenotype .
+//}
+//    """)
+//  //bigdata.begin()
+//  val profilesOutput = new BufferedOutputStream(new FileOutputStream(new File(cwd + "/staging/kb/profiles.ttl")))
+//  profilesQuery.evaluate(new TurtleWriter(profilesOutput))
+//  profilesOutput.close()
   //bigdata.commit()
 
   bigdata.close()
