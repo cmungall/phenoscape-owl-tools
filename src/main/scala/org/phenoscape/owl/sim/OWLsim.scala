@@ -19,14 +19,19 @@ import org.openrdf.model.impl.StatementImpl
 import org.phenoscape.owl.Vocab
 import org.openrdf.model.impl.NumericLiteralImpl
 import org.openrdf.model.vocabulary.RDF
+import com.google.common.collect.HashMultiset
+import org.phenoscape.owl.util.ExpressionUtil
+import org.semanticweb.owlapi.model.IRI
 
 class OWLsim(ontology: OWLOntology, inCorpus: OWLNamedIndividual => Boolean) {
+
+  val factory = OWLManager.getOWLDataFactory
 
   type SuperClassOfIndex = Map[Node, Set[Node]]
   type SubClassOfIndex = Map[Node, Set[Node]]
 
-  private val OWLThing = OWLManager.getOWLDataFactory.getOWLThing
-  private val OWLNothing = OWLManager.getOWLDataFactory.getOWLNothing
+  private val OWLThing = factory.getOWLThing
+  private val OWLNothing = factory.getOWLNothing
 
   val (superClassOfIndex, subClassOfIndex, directAssociationsByNode, directAssociationsByIndividual) = {
     val reasoner = new ElkReasonerFactory().createReasoner(ontology)
@@ -154,6 +159,25 @@ class OWLsim(ontology: OWLOntology, inCorpus: OWLNamedIndividual => Boolean) {
   def commonSubsumersOf(i: OWLNamedIndividual, j: OWLNamedIndividual): Set[Node] =
     directAndIndirectAssociationsByIndividual(i).intersect(directAndIndirectAssociationsByIndividual(j))
 
+  def lowestNodes(nodes: Set[Node]): Set[Node] = {
+    val superNodes = HashMultiset.create[Node]
+    nodes.foreach(node => childToReflexiveAncestorIndex(node).foreach(superNodes.add))
+    superNodes.entrySet.asScala.filter(_.getCount == 1).map(_.getElement).toSet
+  }
+
+  def maxICSubsumerIntersection(i: Node, j: Node): Subsumer = {
+    if (i == j) i else {
+      val lcaNodes = lowestNodes(commonSubsumersOf(i, j))
+      SubsumerIntersection(lcaNodes, intersectionIC(lcaNodes))
+    }
+  }
+
+  def intersectionIC(nodes: Set[Node]): Double = {
+    val instancesInCorpus = nodes.flatMap(directAndIndirectAssociationsByNode).intersect(individualsInCorpus)
+    val freq = instancesInCorpus.size
+    normalizedIC(freq)
+  }
+
   def maxICSubsumer(i: Node, j: Node): Node = if (i == j) i else commonSubsumersOf(i, j).maxBy(nodeIC)
 
   def groupWiseSimilarity(queryIndividual: OWLNamedIndividual, corpusIndividual: OWLNamedIndividual): GroupWiseSimilarity = optimize {
@@ -161,8 +185,12 @@ class OWLsim(ontology: OWLOntology, inCorpus: OWLNamedIndividual => Boolean) {
       queryAnnotation <- directAssociationsByIndividual(queryIndividual)
     } yield {
       directAssociationsByIndividual(corpusIndividual).map { corpusAnnotation =>
-        val maxSubsumer = maxICSubsumer(queryAnnotation, corpusAnnotation)
-        PairScore(queryAnnotation, corpusAnnotation, maxSubsumer, nodeIC(maxSubsumer))
+        val maxSubsumer = maxICSubsumerIntersection(queryAnnotation, corpusAnnotation)
+        val ic = maxSubsumer match {
+          case n: Node                 => nodeIC(n)
+          case i: SubsumerIntersection => i.ic
+        }
+        PairScore(queryAnnotation, corpusAnnotation, maxSubsumer, ic)
       }.maxBy(_.maxSubsumerIC)
     }
     val medianScore = median(pairScores.map(_.maxSubsumerIC).toSeq)
@@ -185,20 +213,22 @@ class OWLsim(ontology: OWLOntology, inCorpus: OWLNamedIndividual => Boolean) {
       }.toSet
     }
 
-  def classICScoresAsTriples: Set[Statement] = {
-    val has_ic = new URIImpl("http://purl.org/phenoscape/vocab.owl#has_ic")
-    (for {
-      (node, ic) <- nodeIC
-      term <- node.classes
-    } yield {
-      val termURL = new URIImpl(term.getIRI.toString)
-      new StatementImpl(termURL, has_ic, new NumericLiteralImpl(ic))
-    }).toSet
-  }
+  //  def classICScoresAsTriples: Set[Statement] = {
+  //    val has_ic = new URIImpl("http://purl.org/phenoscape/vocab.owl#has_ic")
+  //    (for {
+  //      (node, ic) <- nodeIC
+  //      term <- node.classes
+  //    } yield {
+  //      val termURL = new URIImpl(term.getIRI.toString)
+  //      new StatementImpl(termURL, has_ic, new NumericLiteralImpl(ic))
+  //    })).toSet
+  //  }
 
 }
 
-case class Node(classes: Set[OWLClass])
+sealed trait Subsumer
+
+case class Node(classes: Set[OWLClass]) extends Subsumer
 
 object Node {
 
@@ -206,7 +236,13 @@ object Node {
 
 }
 
-case class PairScore(queryAnnotation: Node, corpusAnnotation: Node, maxSubsumer: Node, maxSubsumerIC: Double)
+case class SubsumerIntersection(nodes: Set[Node], ic: Double) extends Subsumer {
+
+  lazy val iri: IRI = ExpressionUtil.nameForExpression(OWLManager.getOWLDataFactory.getOWLObjectIntersectionOf(nodes.flatMap(_.classes).asJava)).getIRI
+
+}
+
+case class PairScore(queryAnnotation: Node, corpusAnnotation: Node, maxSubsumer: Subsumer, maxSubsumerIC: Double)
 
 case class GroupWiseSimilarity(queryIndividual: OWLNamedIndividual, corpusIndividual: OWLNamedIndividual, score: Double, pairs: Set[PairScore]) {
 
@@ -216,18 +252,24 @@ case class GroupWiseSimilarity(queryIndividual: OWLNamedIndividual, corpusIndivi
   private val for_corpus_profile = new URIImpl(Vocab.for_corpus_profile.getIRI.toString)
   private val FoundAsMICA = new URIImpl(Vocab.FoundAsMICA.getIRI.toString)
 
-  def toTriples: Set[Statement] = {
+  def toTriples: Set[Statement] = { //FIXME not done modifying for dynamic subsumers
     val self = new URIImpl(OntologyUtil.nextIRI.toString)
     val micasTriples = for {
       pair <- pairs
-      subsumer <- pair.maxSubsumer.classes
-    } yield new StatementImpl(new URIImpl(subsumer.getIRI.toString), RDF.TYPE, FoundAsMICA)
+      subsumerIRI <- pair.maxSubsumer match {
+        case n: Node                 => n.classes.map(_.getIRI)
+        case i: SubsumerIntersection => Set(i.iri)
+      }
+    } yield new StatementImpl(new URIImpl(subsumerIRI.toString), RDF.TYPE, FoundAsMICA)
     val bestPairComparisons = pairs.toSeq.sortBy(_.maxSubsumerIC).takeRight(20).filter(_.maxSubsumerIC > 0)
-    val distinctSubsumers: Set[Node] = bestPairComparisons.map(_.maxSubsumer).toSet
+    val distinctSubsumers: Set[Subsumer] = bestPairComparisons.map(_.maxSubsumer).toSet
     val subsumerTriples = for {
-      node <- distinctSubsumers
-      term <- node.classes
-    } yield new StatementImpl(self, has_subsumer, new URIImpl(term.getIRI.toString))
+      subsumer <- distinctSubsumers
+      termIRI <- subsumer match {
+        case n: Node                 => n.classes.map(_.getIRI)
+        case i: SubsumerIntersection => Set(i.iri)
+      }
+    } yield new StatementImpl(self, has_subsumer, new URIImpl(termIRI.toString))
     Set(
       new StatementImpl(self, combined_score, new NumericLiteralImpl(score)),
       new StatementImpl(self, for_query_profile, new URIImpl(queryIndividual.getIRI.toString)),

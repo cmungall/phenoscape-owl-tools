@@ -41,6 +41,7 @@ libraryDependencies ++= {
       "com.bigdata"            %   "bigdata"                       % "1.3.4",
       "org.openrdf.sesame"     %   "sesame-rio"                    % "2.6.10",
       "org.phenoscape"         %   "scowl"                         % "0.9",
-      "org.phenoscape"         %   "owlet"                         % "1.3"
+      "org.phenoscape"         %   "owlet"                         % "1.3",
+      "com.google.guava"       %   "guava"                         % "16.0.1"
   )
 }
