@@ -252,7 +252,7 @@ case class GroupWiseSimilarity(queryIndividual: OWLNamedIndividual, corpusIndivi
   private val for_corpus_profile = new URIImpl(Vocab.for_corpus_profile.getIRI.toString)
   private val FoundAsMICA = new URIImpl(Vocab.FoundAsMICA.getIRI.toString)
 
-  def toTriples: Set[Statement] = { //FIXME not done modifying for dynamic subsumers
+  def toTriples: Set[Statement] = {
     val self = new URIImpl(OntologyUtil.nextIRI.toString)
     val micasTriples = for {
       pair <- pairs
